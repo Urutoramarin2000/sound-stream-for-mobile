@@ -273,14 +273,14 @@ unsafe fn balloon(hwnd: HWND, n: &Note) {
 
 fn tooltip(a: &App) -> String {
     if a.port_busy.load(Ordering::SeqCst) {
-        return format!("Sound Stream — порт {} занят", a.cfg.port);
+        return format!("Sound Stream — 端口 {} 被占用", a.cfg.port);
     }
     if !a.server_up.load(Ordering::SeqCst) {
-        return "Sound Stream — запуск…".into();
+        return "Sound Stream — 启动中…".into();
     }
     match a.listeners() {
-        0 => "Sound Stream — работает".into(),
-        n => format!("Sound Stream — в эфире, слушателей: {n}"),
+        0 => "Sound Stream — 运行中".into(),
+        n => format!("Sound Stream — 推流中，{n} 位听众"),
     }
 }
 

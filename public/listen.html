@@ -1,531 +1,679 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#000000" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Звук ПК" />
+<meta name="apple-mobile-web-app-title" content="电脑声音" />
 <link rel="icon" href="/favicon.png" sizes="32x32" type="image/png" />
 <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
 <link rel="apple-touch-icon" href="/icon-180.png" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<title>Sound Stream — Слушать</title>
+<title>Sound Stream</title>
 <style>
-  /* Плоская тёмная тема в духе iOS: чистый чёрный фон, системная палитра,
-     без градиентов, без рамок и «карточки» — одно целостное полотно. */
   :root {
     color-scheme: dark;
-    --bg: #000000;
-    --surface: #1c1c1e;      /* inset-группа, как в Настройках iOS */
+    --bg: #000;
+    --surface: #1c1c1e;
+    --surface2: #2c2c2e;
     --track: #39393d;
-    --text: #ffffff;
+    --text: #fff;
     --secondary: rgba(235, 235, 245, .6);
-    --tertiary: rgba(235, 235, 245, .3);
+    --tertiary: rgba(235, 235, 245, .32);
     --green: #30d158;
     --red: #ff453a;
+    --c0: #64d2ff;  /* 采集 */
+    --c1: #bf5af2;  /* 网络 */
+    --c2: #30d158;  /* 缓冲 */
+    --c3: #ffd60a;  /* 输出 */
   }
   * { box-sizing: border-box; }
-  /* Экран приложения, а не документ: скролла нет вообще (никакой резинки на iOS),
-     двойной тап не зумит (touch-action: manipulation). */
-  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body {
-    position: fixed; inset: 0;
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: -apple-system, system-ui, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-font-smoothing: antialiased;
-    -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+    margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, system-ui, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent; -webkit-font-smoothing: antialiased;
     touch-action: manipulation;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none; user-select: none;
   }
   .page {
-    height: 100%; overflow: hidden;
-    max-width: 420px; margin: 0 auto;
-    display: flex; flex-direction: column; align-items: center;
-    padding: calc(24px + env(safe-area-inset-top)) 24px calc(20px + env(safe-area-inset-bottom));
+    max-width: 440px; margin: 0 auto;
+    padding: calc(18px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 12px;
   }
 
-  /* --- шапка: обложка, название, статус --- */
-  .top { display: flex; flex-direction: column; align-items: center; margin-top: min(6vh, 40px); flex: none; }
-  /* Обложка — та же иконка, что у приложения на экране «Домой». */
-  .art {
-    width: 96px; height: 96px; border-radius: 22px;
-    background: var(--surface); display: block;
-    -webkit-user-drag: none; user-select: none;
-  }
-
-  h1 { margin: 20px 0 0; font-size: 24px; font-weight: 650; letter-spacing: .2px; }
-  .status {
-    margin: 8px 0 0; display: flex; align-items: center; gap: 8px;
-    font-size: 15px; color: var(--secondary);
-  }
+  .top { display: flex; align-items: center; gap: 14px; padding: 4px 4px 0; }
+  .art { width: 52px; height: 52px; border-radius: 12px; background: var(--surface); flex: none; }
+  h1 { margin: 0; font-size: 20px; font-weight: 650; }
+  .status { margin: 4px 0 0; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--secondary); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #636366; flex: none; }
-  .dot.live { background: var(--green); animation: pulse 2s infinite; }
+  .dot.live { background: var(--green); }
   .dot.err { background: var(--red); }
-  @keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(48, 209, 88, .45); }
-    70% { box-shadow: 0 0 0 7px rgba(48, 209, 88, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(48, 209, 88, 0); }
-  }
 
-  /* --- центр: живой эквалайзер (реальный спектр) и кнопка play/pause --- */
-  /* min-height: 0 — чтобы центр сжимался на низких экранах и страница
-     всегда помещалась целиком (скролла-то нет). */
-  .stage {
-    flex: 1; min-height: 0; width: 100%;
-    margin-top: clamp(20px, 7vh, 72px);  /* воздух между шапкой и эквалайзером */
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 10px;
-  }
-  .viz { width: 100%; max-width: 360px; height: clamp(80px, 24vh, 200px); min-height: 0; }
-  .viz canvas { width: 100%; height: 100%; display: block; }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0 4px; }
   .play {
-    border: 0; background: none; padding: 18px; cursor: pointer; color: var(--text);
-    transition: transform .18s ease, opacity .18s ease;
+    border: 0; background: var(--text); color: #000; width: 84px; height: 84px; border-radius: 50%;
+    display: grid; place-items: center; cursor: pointer; transition: transform .15s ease, opacity .15s ease;
   }
-  .play svg { width: 72px; height: 72px; fill: currentColor; display: block; }
-  .play .i-play { transform: translateX(4px); }  /* оптическое центрирование треугольника */
+  .play svg { width: 40px; height: 40px; fill: currentColor; display: block; }
+  .play .i-play { transform: translateX(3px); }
   .play .i-pause { display: none; }
   .play.playing .i-play { display: none; }
   .play.playing .i-pause { display: block; }
-  .play:active { transform: scale(.88); }
+  .play:active { transform: scale(.92); }
   .play:disabled { opacity: .25; cursor: default; }
+  .viz { width: 100%; height: 44px; display: block; }
+  .viz[hidden] { display: none; }
+  .hint { font-size: 12px; color: var(--tertiary); }
 
-  /* --- низ: задержка, inset-группа с буфером, подсказка --- */
-  .bottom { width: 100%; flex: none; }
-  .lat {
-    text-align: center; font-size: 13px; color: var(--tertiary);
-    margin-bottom: 14px; font-variant-numeric: tabular-nums;
-  }
-  .cell {
-    background: var(--surface); border-radius: 14px; padding: 14px 16px 12px;
-  }
-  .row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
-  .lbl { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .cell { background: var(--surface); border-radius: 14px; padding: 14px 16px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .lbl { font-size: 13px; letter-spacing: .04em; color: var(--secondary); }
   .val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .scale { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--tertiary); }
+  .note { font-size: 12px; color: var(--tertiary); margin-top: 8px; line-height: 1.45; }
+
+  /* 延迟卡片 */
+  .lat-total { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .lat-total small { font-size: 15px; font-weight: 600; color: var(--secondary); margin-left: 2px; }
+  .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface2); margin: 10px 0 10px; }
+  .bar i { display: block; height: 100%; width: 0; transition: width .4s ease; }
+  .c0 { background: var(--c0); } .c1 { background: var(--c1); } .c2 { background: var(--c2); } .c3 { background: var(--c3); }
+  .legend { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 12px; color: var(--secondary); }
+  .legend span { display: flex; flex-direction: column; gap: 2px; }
+  .legend em { font-style: normal; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .k { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 0; }
+  details.more { margin-top: 10px; font-size: 12px; color: var(--tertiary); }
+  details.more summary { cursor: pointer; color: var(--secondary); list-style: none; }
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary::after { content: " ›"; }
+  details.more[open] summary::after { content: " ⌄"; }
+  details.more p { margin: 6px 0 0; line-height: 1.5; }
+  .stats { font-variant-numeric: tabular-nums; }
+
+  /* 设备选择 */
+  .sel-row { display: flex; gap: 8px; margin-top: 10px; }
+  select {
+    flex: 1; min-width: 0; appearance: none; -webkit-appearance: none;
+    background: var(--surface2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23aaa' stroke-width='1.6' fill='none'/%3E%3C/svg%3E") no-repeat right 12px center;
+    color: var(--text); border: 0; border-radius: 10px; padding: 10px 34px 10px 12px; font: inherit; font-size: 15px;
+  }
+  .icon-btn {
+    flex: none; width: 42px; border: 0; border-radius: 10px; background: var(--surface2); color: var(--text);
+    font-size: 18px; cursor: pointer;
+  }
+  .icon-btn:active { opacity: .6; }
+
+  /* 分段按钮 */
+  .seg { display: inline-flex; background: var(--surface2); border-radius: 9px; padding: 2px; }
+  .seg button {
+    border: 0; background: none; color: var(--secondary); font: inherit; font-size: 13px; padding: 5px 14px;
+    border-radius: 7px; cursor: pointer;
+  }
+  .seg button.on { background: #636366; color: var(--text); }
 
   input[type=range] {
-    -webkit-appearance: none; appearance: none; width: 100%; height: 28px;
-    background: transparent; cursor: pointer; --p: 0%;
-    touch-action: none;  /* палец на ползунке тянет ползунок, а не страницу */
+    -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin-top: 6px;
+    background: transparent; cursor: pointer; --p: 0%; touch-action: none;
   }
   input[type=range]::-webkit-slider-runnable-track {
     height: 4px; border-radius: 2px;
-    background: linear-gradient(#fff, #fff) no-repeat, var(--track); /* плоская белая заливка */
-    background-size: var(--p) 100%, 100% 100%;
+    background: linear-gradient(#fff, #fff) no-repeat, var(--track); background-size: var(--p) 100%, 100% 100%;
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none; width: 24px; height: 24px; margin-top: -10px;
-    border-radius: 50%; background: #fff; border: 0;
-    box-shadow: 0 3px 8px rgba(0, 0, 0, .45);
+    border-radius: 50%; background: #fff; border: 0; box-shadow: 0 3px 8px rgba(0,0,0,.45);
   }
   input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--track); }
   input[type=range]::-moz-range-progress { height: 4px; border-radius: 2px; background: #fff; }
-  input[type=range]::-moz-range-thumb {
-    width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff;
-    box-shadow: 0 3px 8px rgba(0, 0, 0, .45);
+  input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff; }
+  .scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--tertiary); }
+
+  /* 开关 */
+  .sw-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+  .sw-row .t { display: block; font-size: 15px; }
+  .sw-row .note { margin-top: 2px; }
+  .sep { height: 1px; background: rgba(84, 84, 88, .45); margin: 12px 0; }
+  .sw {
+    -webkit-appearance: none; appearance: none; flex: none; width: 51px; height: 31px; border-radius: 16px;
+    background: var(--track); position: relative; cursor: pointer; transition: background .2s; margin: 0;
   }
+  .sw::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+    background: #fff; transition: transform .2s; box-shadow: 0 2px 4px rgba(0,0,0,.3);
+  }
+  .sw:checked { background: var(--green); }
+  .sw:checked::after { transform: translateX(20px); }
 
   #sink { display: none; }
-
-  /* Совсем низкие экраны: ужимаем шапку и кнопку, чтобы всё влезло без скролла
-     и эквалайзеру осталось место. */
-  @media (max-height: 620px) {
-    .top { margin-top: 0; }
-    .art { width: 64px; height: 64px; border-radius: 16px; }
-    h1 { margin-top: 12px; font-size: 20px; }
-    .stage { margin-top: 14px; }
-    .play { padding: 10px; }
-    .play svg { width: 56px; height: 56px; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .dot.live { animation: none !important; }
-  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-  <main class="page">
-    <header class="top">
-      <img class="art" src="/icon-192.png" width="96" height="96" alt="" aria-hidden="true" />
-      <h1>Звук с ПК</h1>
-      <p class="status"><span id="dot" class="dot"></span><span id="statusText">Подключение…</span></p>
-    </header>
-
-    <div class="stage">
-      <div class="viz" aria-hidden="true"><canvas id="viz"></canvas></div>
-      <button id="play" class="play" disabled aria-label="Воспроизвести">
-        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="6" y="5" width="4" height="14" rx="1.2"/>
-          <rect x="14" y="5" width="4" height="14" rx="1.2"/>
-        </svg>
-      </button>
+<main class="page">
+  <header class="top">
+    <img class="art" src="/icon-192.png" width="52" height="52" alt="" aria-hidden="true" />
+    <div>
+      <h1>电脑声音</h1>
+      <p class="status"><span id="dot" class="dot"></span><span id="statusText">连接中…</span></p>
     </div>
+  </header>
 
-    <!-- Скрытый <audio> — настоящая медиа-дорожка. Через него iOS продолжает
-         играть звук в фоне и с выключенным экраном. -->
-    <audio id="sink" playsinline></audio>
+  <section class="stage">
+    <button id="play" class="play" disabled aria-label="播放">
+      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/>
+      </svg>
+    </button>
+    <canvas id="viz" class="viz" aria-hidden="true"></canvas>
+    <div class="hint" id="hint">空格键 播放 / 停止</div>
+  </section>
 
-    <footer class="bottom">
-      <div class="lat" id="lat">Задержка: — мс</div>
+  <section class="cell" aria-live="off">
+    <div class="row">
+      <span class="lbl">估算延迟（电脑混音 → 你听到）</span>
+      <span class="lat-total" id="latTotal">—</span>
+    </div>
+    <div class="bar"><i class="c0" id="b0"></i><i class="c1" id="b1"></i><i class="c2" id="b2"></i><i class="c3" id="b3"></i></div>
+    <div class="legend">
+      <span><span><b class="k c0"></b>采集</span><em id="l0">—</em></span>
+      <span><span><b class="k c1"></b>网络</span><em id="l1">—</em></span>
+      <span><span><b class="k c2"></b>缓冲</span><em id="l2">—</em></span>
+      <span><span><b class="k c3"></b>输出</span><em id="l3">—</em></span>
+    </div>
+    <details class="more">
+      <summary class="stats" id="stats">抖动 — · 卡顿 0 次</summary>
+      <p><b>采集</b>：声音在 Windows 混音器产生后、到发出网络包前等待的时间（电脑实测）。<br>
+         <b>网络</b>：往返时间的一半（每秒测一次，取最近 10 次最小值）。<br>
+         <b>缓冲</b>：包到达后在本页排队等待播放的时间，自动模式下按网络抖动自适应。<br>
+         <b>输出</b>：浏览器报告的音频输出延迟；蓝牙耳机、锁屏模式的额外延迟可能不在其中。</p>
+      <p class="stats" id="stats2"></p>
+    </details>
+  </section>
 
-      <section class="cell">
-        <div class="row">
-          <span class="lbl">Буфер</span>
-          <span id="bufVal" class="val">10 мс</span>
-        </div>
-        <input id="buf" type="range" min="10" max="200" step="5" value="10" />
-        <div class="scale"><span>меньше задержка</span><span>стабильнее</span></div>
-      </section>
-    </footer>
-  </main>
+  <section class="cell">
+    <div class="row"><span class="lbl">采集来源（电脑上的哪个声音设备）</span></div>
+    <div class="sel-row">
+      <select id="dev" disabled aria-label="采集设备">
+        <option value="">跟随 Windows 默认输出</option>
+      </select>
+      <button class="icon-btn" id="devRefresh" aria-label="刷新设备列表" title="刷新设备列表">↻</button>
+    </div>
+    <div class="note" id="fmt">—</div>
+  </section>
+
+  <section class="cell">
+    <div class="row">
+      <span class="lbl">缓冲</span>
+      <div class="seg"><button data-m="auto">自动</button><button data-m="manual">手动</button></div>
+    </div>
+    <div id="manualBox" hidden>
+      <div class="row" style="margin-top:10px"><span class="note" style="margin:0">最小安全余量</span><span id="bufVal" class="val">20 ms</span></div>
+      <input id="buf" type="range" min="0" max="150" step="1" value="20" aria-label="最小安全余量" />
+      <div class="scale"><span>更低延迟</span><span>更稳定</span></div>
+    </div>
+    <div class="note" id="autoNote">自动：让最近 8 秒里最紧张的时刻也还剩约 3 ms 余量；一旦卡顿就加大余量，稳定 15 秒后再慢慢收回。追赶时用不超过 0.6% 的平滑变速，听不出音高跳变。</div>
+  </section>
+
+  <section class="cell">
+    <label class="sw-row"><span><span class="t">锁屏 / 后台继续播放</span><span class="note">iPhone 锁屏或切到别的 App 时需要；会多一点输出延迟</span></span><input type="checkbox" id="bg" class="sw" /></label>
+    <div class="sep"></div>
+    <label class="sw-row"><span><span class="t">频谱动画</span><span class="note">关掉更省电（30 帧/秒）</span></span><input type="checkbox" id="vizOn" class="sw" /></label>
+  </section>
+
+  <audio id="sink" playsinline></audio>
+</main>
 
 <script>
-// --- Никакого скролла и зума: страница ведёт себя как экран приложения. ---
-// Safari на iOS игнорирует user-scalable=no, поэтому глушим жесты руками:
-// resize-жест (pinch), «резинку» при протяжке и зум по двойному тапу.
-document.addEventListener('touchmove', (e) => {
-  if (e.touches.length > 1) { e.preventDefault(); return; }        // pinch-zoom
-  const t = e.target;
-  if (!(t instanceof Element) || !t.closest('input[type=range]')) e.preventDefault();
-}, { passive: false });
-for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
-  document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
-}
-document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
-// Старые Safari трактуют второй тап в пределах 350 мс как «зум» — съедаем его,
-// но только вне кнопок и ползунка, чтобы не сломать быстрые нажатия play/pause.
-let lastTap = 0;
-document.addEventListener('touchend', (e) => {
-  const now = Date.now();
-  const t = e.target;
-  const control = t instanceof Element && t.closest('button, input');
-  if (!control && now - lastTap < 350) e.preventDefault();
-  lastTap = now;
-}, { passive: false });
+'use strict';
+// ===================== 基础 =====================
+const $ = (id) => document.getElementById(id);
+const playBtn = $('play'), dot = $('dot'), statusText = $('statusText'), audioEl = $('sink');
+const viz = $('viz'), vctx = viz.getContext('2d');
+const devSel = $('dev'), fmtEl = $('fmt'), bufIn = $('buf'), bufVal = $('bufVal');
+const bgIn = $('bg'), vizIn = $('vizOn'), manualBox = $('manualBox'), autoNote = $('autoNote');
+const HEADER = 12;           // 包头：[1][声道][保留2][序号4][PC 端等待 µs 4]
+const AUTO_BASE_MS = 3;      // 自动模式下的最小余量
 
-const playBtn = document.getElementById('play');
-const dot = document.getElementById('dot');
-const statusText = document.getElementById('statusText');
-const audioEl = document.getElementById('sink');
-const latEl = document.getElementById('lat');
-const buf = document.getElementById('buf');
-const bufVal = document.getElementById('bufVal');
-const viz = document.getElementById('viz');
-const vctx = viz.getContext('2d');
-
-let ws = null;
-let audioCtx = null;
-let gainNode = null;
-let streamDest = null;     // MediaStreamAudioDestinationNode -> <audio>
-let streamLive = false;
-let started = false;
-
-let latencyMs = 0;         // сглаженная локальная задержка (буфер + выход)
-let latTimer = null;       // таймер обновления индикатора
-
-let sampleRate = 48000;   // обновляется из format-сообщения источника
-let nextTime = 0;         // момент (в часах audioCtx) для следующего кусочка
-
-const VIZ_BARS = 27;      // столбиков в эквалайзере
-let analyser = null;      // AnalyserNode — реальный спектр играющего звука
-let vizRaf = 0;           // id кадра requestAnimationFrame
-let barMap = null;        // столбик -> диапазон FFT-бинов (лог-шкала)
-
-// Целевой буфер вперёд живого края, мс. Меньше — ниже задержка, но при неровной
-// сети возможны заикания. Из него выводим окно коррекции скоростью (hi/lo вокруг
-// цели) и аварийный порог отставания (max — прыжок к живому краю).
-function cfgFromBuf(ms) {
-  const j = ms / 1000;
-  return { jitter: j, hi: j * 0.9, lo: j * 0.5, max: j * 3 + 0.05 };
-}
-// Safari в приватном режиме бросает исключение на localStorage — оборачиваем.
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-let bufMs = parseInt(lsGet('ss-buf'), 10);
-if (!bufMs) {  // миграция со старых пресетов или значение по умолчанию
-  const old = lsGet('ss-mode');
-  bufMs = old === 'stable' ? 120 : old === 'balanced' ? 60 : 10;
-}
-bufMs = Math.min(200, Math.max(10, bufMs));
-let cfg = cfgFromBuf(bufMs);
+const isTouch = matchMedia('(pointer: coarse)').matches;
+if (isTouch) $('hint').hidden = true;
+
+let mode = lsGet('ss-mode2') === 'manual' ? 'manual' : 'auto';
+let manualMs = Math.min(150, Math.max(0, parseInt(lsGet('ss-buf2'), 10) || 20));
+let bgMode = lsGet('ss-bg') === '1';
+let vizOn = lsGet('ss-viz') !== '0';
+
+// ===================== 状态 =====================
+let ws = null;
+let ctx = null, gain = null, streamDest = null, analyser = null;
+let started = false, live = false;
+let srcRate = 48000;         // 电脑端采样率（format 消息）
+let sr = 48000;              // AudioContext 采样率
+let nextFrame = 0;           // 下一块在 ctx 时间轴上的起始帧（整数，保证样本级首尾相接）
+let queue = [];              // 已排程：{node, s, e}（帧）
+let rsPos = 0, rsL = 0, rsR = 0;   // 流式线性插值重采样状态
+let lastArrival = 0;
+let boostMs = 0;             // 自动模式：卡顿后追加的余量，缓慢衰减
+let lastUnder = 0;           // 上次卡顿的时刻（ms）
+let quietUntil = 0;          // 卡顿后积压的包会一起到达，这段时间不计入余量统计
+const WIN_MS = 8000;         // 余量统计窗口：覆盖周期性的 Wi-Fi 尖峰（如 Mac 的 AWDL）
+const leadT = [], leadV = []; // 最近 8 秒每包到达时的排队余量（秒）
+const arrT = [], arrO = [];   // 最近 3 秒到达时间偏差（毫秒），算抖动
+let anchorT = 0, anchorFrames = 0;
+const st = { pc: NaN, buf: NaN, rtts: [], under: 0, cuts: 0, ratio: 1, pkts: 0, lastPkts: 0, pps: 0 };
+let fmtInfo = null;
 
 function setStatus(text, cls) {
   statusText.textContent = text;
   dot.className = 'dot' + (cls ? ' ' + cls : '');
 }
+function send(s) { if (ws && ws.readyState === 1) ws.send(s); }
 
-function wsURL() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${location.host}/?role=listener`;
-}
-
+// ===================== 连接 =====================
 function connect() {
-  ws = new WebSocket(wsURL());
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/?role=listener`);
   ws.binaryType = 'arraybuffer';
-
-  ws.onopen = () => setStatus('Подключено. Ожидание эфира…');
-
+  ws.onopen = () => { setStatus('已连接，等待声音…'); send('devices'); ping(); };
   ws.onmessage = (ev) => {
-    if (typeof ev.data === 'string') {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'format') sampleRate = msg.sampleRate || sampleRate;
-        if (msg.type === 'live') { streamLive = true; onLive(); }
-        if (msg.type === 'offline') { streamLive = false; onOffline(); }
-      } catch {}
-      return;
+    if (typeof ev.data !== 'string') { onAudio(ev.data); return; }
+    let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    switch (msg.type) {
+      case 'live': live = true; onLive(); break;
+      case 'offline': live = false; onOffline(); break;
+      case 'format': onFormat(msg); break;
+      case 'choice': onChoice(msg.id || ''); break;
+      case 'devices': fillDevices(msg); break;
+      case 'pong': {
+        const rtt = performance.now() - msg.t;
+        if (rtt >= 0 && rtt < 5000) { st.rtts.push(rtt); if (st.rtts.length > 10) st.rtts.shift(); }
+        break;
+      }
     }
-    if (started && audioCtx) schedulePCM(ev.data);
   };
-
   ws.onclose = () => {
-    setStatus('Соединение потеряно. Переподключение…', 'err');
+    setStatus('连接断开，重连中…', 'err');
+    live = false; st.rtts.length = 0;
     if (!started) playBtn.disabled = true;
-    setTimeout(connect, 1500);
+    setTimeout(connect, 1000);
   };
-  ws.onerror = () => setStatus('Ошибка соединения', 'err');
+  ws.onerror = () => {};
 }
+function ping() { send('ping ' + performance.now().toFixed(3)); }
+setInterval(ping, 1000);
 
 function onLive() {
-  setStatus(started ? 'Воспроизведение' : 'Эфир идёт', 'live');
-  if (!started) playBtn.disabled = false;
+  setStatus(started ? '播放中' : '电脑在推流，点播放', 'live');
+  playBtn.disabled = false;
+}
+function onOffline() {
+  setStatus('电脑端暂未采集到声音', 'err');
+  if (!started) playBtn.disabled = true;
+}
+function onFormat(m) {
+  fmtInfo = m;
+  srcRate = m.sampleRate || srcRate;
+  anchorT = 0;
+  const kind = m.input ? '输入设备' : '输出回环';
+  const ch = m.srcChannels === 1 ? '单声道→立体声' : '立体声';
+  fmtEl.textContent = `正在采集：${m.device} · ${srcRate / 1000} kHz · ${ch} · ${kind}` +
+    (m.fallback ? '（所选设备不可用，暂用默认输出）' : '');
 }
 
-function onOffline() {
-  setStatus('ПК не в эфире', 'err');
-  if (!started) playBtn.disabled = true;
+// ===================== 设备选择 =====================
+function fillDevices(m) {
+  const cur = m.choice || '';
+  devSel.textContent = '';
+  const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; return o; };
+  devSel.appendChild(opt('', '跟随 Windows 默认输出'));
+  const groups = [
+    ['输出设备（采集它正在播放的声音）', m.list.filter((d) => !d.input)],
+    ['输入设备（麦克风 / 线路输入 / 虚拟声卡）', m.list.filter((d) => d.input)],
+  ];
+  for (const [label, items] of groups) {
+    if (!items.length) continue;
+    const g = document.createElement('optgroup'); g.label = label;
+    for (const d of items) g.appendChild(opt(d.id, d.name + (d.default ? '（默认）' : '')));
+    devSel.appendChild(g);
+  }
+  if (cur && !m.list.some((d) => d.id === cur)) devSel.appendChild(opt(cur, '已选设备（未连接）'));
+  devSel.value = cur;
+  devSel.disabled = false;
+}
+function onChoice(id) {
+  if ([...devSel.options].some((o) => o.value === id)) devSel.value = id;
+  else send('devices');
+}
+devSel.addEventListener('change', () => send('select ' + devSel.value));
+$('devRefresh').addEventListener('click', () => send('devices'));
+
+// ===================== 播放 =====================
+function setpoint() {   // 秒：希望最近 8 秒里排队余量的最小值保持在这个水平
+  return (mode === 'manual' ? manualMs : AUTO_BASE_MS + boostMs) / 1000;
 }
 
 function startPlayback() {
   if (started) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  gainNode = audioCtx.createGain();
-  gainNode.gain.value = 1;   // громкость регулируется кнопками телефона
-
-  // Ключевой момент для фона/выключенного экрана на iOS:
-  // не выводим звук напрямую в audioCtx.destination, а гоним его в MediaStream
-  // и воспроизводим через обычный <audio>. Для системы это «медиа-дорожка»,
-  // поэтому AudioContext не глушится в фоне и появляются контролы на локскрине.
-  streamDest = audioCtx.createMediaStreamDestination();
-  gainNode.connect(streamDest);
-  audioEl.srcObject = streamDest.stream;
-
-  // Живой эквалайзер: тот же сигнал заводим в анализатор спектра.
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 512;
-  analyser.smoothingTimeConstant = 0.75;
-  gainNode.connect(analyser);
-  buildBarMap(audioCtx.sampleRate, analyser.frequencyBinCount);
-
-  audioCtx.resume();           // обязательно по жесту пользователя (особенно iOS)
-  const p = audioEl.play();    // тоже по жесту — иначе iOS не отдаст фон
-  if (p && p.catch) p.catch(() => {});
-
-  setupMediaSession();
-
-  nextTime = 0;
+  // iOS 17+：按“媒体播放”处理，静音开关不再把网页声音静掉。
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  const AC = window.AudioContext || window.webkitAudioContext;
+  // 与电脑端同采样率：不用重采样，样本原样播放。
+  try { ctx = new AC({ latencyHint: 'interactive', sampleRate: srcRate }); }
+  catch (e) { ctx = new AC({ latencyHint: 'interactive' }); }
+  sr = ctx.sampleRate;
+  gain = ctx.createGain();
+  if (bgMode) {
+    // 锁屏/后台模式：经 MediaStream 交给 <audio>，系统把它当媒体播放，不会在后台被挂起。
+    streamDest = ctx.createMediaStreamDestination();
+    gain.connect(streamDest);
+    audioEl.srcObject = streamDest.stream;
+    const p = audioEl.play(); if (p && p.catch) p.catch(() => {});
+    setupMediaSession();
+  } else {
+    gain.connect(ctx.destination);   // 直连输出：延迟最低
+  }
+  ctx.resume();
+  nextFrame = 0; queue = []; rsPos = 0; rsL = rsR = 0;
+  leadT.length = leadV.length = 0;
+  boostMs = mode === 'auto' ? 12 : 0;   // 开头稍保守，几十秒内自动收紧
+  st.under = 0; st.cuts = 0; st.buf = NaN;
   started = true;
-  startLatencyReadout();
-  startViz();
+  if (vizOn) attachViz();
   playBtn.classList.add('playing');
-  playBtn.setAttribute('aria-label', 'Остановить');
-  setStatus(streamLive ? 'Воспроизведение' : 'Ожидание эфира…', streamLive ? 'live' : '');
+  playBtn.setAttribute('aria-label', '停止');
+  playBtn.disabled = false;
+  setStatus(live ? '播放中' : '等待电脑端声音…', live ? 'live' : '');
 }
 
-// Периодически выводим сглаженную задержку в мс, пока идёт воспроизведение.
-function startLatencyReadout() {
-  latencyMs = 0;
-  latEl.textContent = 'Задержка: измеряю…';
-  clearInterval(latTimer);
-  latTimer = setInterval(() => {
-    if (started && latencyMs) latEl.textContent = 'Задержка: ~' + Math.round(latencyMs) + ' мс';
-  }, 300);
+function stopPlayback() {
+  if (!started) return;
+  started = false;
+  for (const q of queue) { try { q.node.stop(); } catch (e) {} }
+  queue = [];
+  detachViz();
+  if (audioEl.srcObject) { audioEl.pause(); audioEl.srcObject = null; }
+  if (ctx) ctx.close().catch(() => {});
+  ctx = gain = streamDest = null;
+  playBtn.classList.remove('playing');
+  playBtn.setAttribute('aria-label', '播放');
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  if (live) onLive(); else onOffline();
 }
+function restartPlayback() { if (started) { stopPlayback(); startPlayback(); } }
 
-function stopLatencyReadout() {
-  clearInterval(latTimer);
-  latTimer = null;
-  latencyMs = 0;
-  latEl.textContent = 'Задержка: — мс';
-}
+playBtn.addEventListener('click', () => { if (started) stopPlayback(); else startPlayback(); });
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.target.closest('select, input, button')) return;
+  e.preventDefault();
+  if (started) stopPlayback(); else if (!playBtn.disabled) startPlayback();
+});
 
-// Метаданные и контролы для экрана блокировки / шторки уведомлений.
 function setupMediaSession() {
   if (!('mediaSession' in navigator)) return;
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: 'Звук ПК',
-      artist: 'Sound Stream',
-      artwork: [
-        { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-        { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
-      ]
+      title: '电脑声音', artist: 'Sound Stream',
+      artwork: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+                { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }],
     });
     navigator.mediaSession.playbackState = 'playing';
-    navigator.mediaSession.setActionHandler('play', () => {
-      if (!started) startPlayback();
-      audioEl.play().catch(() => {});
-      navigator.mediaSession.playbackState = 'playing';
-    });
+    navigator.mediaSession.setActionHandler('play', () => { if (!started) startPlayback(); audioEl.play().catch(() => {}); });
     navigator.mediaSession.setActionHandler('pause', stopPlayback);
     navigator.mediaSession.setActionHandler('stop', stopPlayback);
   } catch (e) {}
 }
 
-// Int16 PCM (моно) -> запланированное воспроизведение через Web Audio.
-function schedulePCM(arrayBuffer) {
-  const i16 = new Int16Array(arrayBuffer);
-  const n = i16.length;
-  if (n === 0) return;
-  const buffer = audioCtx.createBuffer(1, n, sampleRate);
-  const f32 = buffer.getChannelData(0);
-  for (let i = 0; i < n; i++) f32[i] = i16[i] / 0x8000;
+// 收到一个音频包。
+function onAudio(buf) {
+  if (buf.byteLength <= HEADER) return;
+  const dv = new DataView(buf);
+  if (dv.getUint8(0) !== 1) return;
+  const ch = dv.getUint8(1) || 2;
+  const pcAge = dv.getUint32(8, true) / 1000;
+  const pcm = new Int16Array(buf, HEADER, (buf.byteLength - HEADER) >> 1);
+  const n = (pcm.length / ch) | 0;
+  if (!n) return;
+  const tms = performance.now();
+  const gap = tms - lastArrival;
+  lastArrival = tms;
+  st.pkts++;
 
-  const now = audioCtx.currentTime;
-  // Старт/недобор буфера или авария (слишком большое отставание) — задаём запас.
-  if (nextTime < now + 0.005 || nextTime - now > cfg.max) nextTime = now + cfg.jitter;
+  // 到达抖动：实际到达时刻相对“按采样数推算的理想时刻”的偏差。
+  if (!anchorT || gap > 250) { anchorT = tms; anchorFrames = 0; arrT.length = arrO.length = 0; }
+  arrT.push(tms); arrO.push(tms - (anchorT + anchorFrames / srcRate * 1000));
+  anchorFrames += n;
+  while (arrT[0] < tms - 3000) { arrT.shift(); arrO.shift(); }
 
-  // Плавная коррекция задержки скоростью (±%, на слух почти незаметно):
-  // отстаём от живого края — чуть ускоряемся, подобрались слишком близко — тормозим.
-  const lead = nextTime - now;
-  let rate = 1;
-  if (lead > cfg.jitter + cfg.hi) rate = 1.02;
-  else if (lead < cfg.jitter - cfg.lo) rate = 0.99;
-
-  // Локальная задержка = буфер впереди живого края + задержка вывода устройства.
-  // Сетевую часть (ПК→сервер→сюда) без синхронизации часов не измерить.
-  const out = audioCtx.outputLatency || audioCtx.baseLatency || 0;
-  const inst = (lead + out) * 1000;
-  latencyMs = latencyMs ? latencyMs * 0.9 + inst * 0.1 : inst;
-
-  const src = audioCtx.createBufferSource();
-  src.buffer = buffer;
-  src.playbackRate.value = rate;
-  src.connect(gainNode);
-  src.start(nextTime);
-  nextTime += buffer.duration / rate; // реальная длительность с учётом скорости
+  st.pc = isNaN(st.pc) ? pcAge : st.pc * 0.95 + pcAge * 0.05;
+  if (!started || !ctx) return;
+  schedule(pcm, ch, n, tms, gap);
 }
 
-function stopPlayback() {
-  started = false;
-  stopLatencyReadout();
-  playBtn.classList.remove('playing');
-  playBtn.setAttribute('aria-label', 'Воспроизвести');
-  if (audioEl) { audioEl.pause(); audioEl.srcObject = null; }
-  if (audioCtx) audioCtx.close().catch(() => {});
-  audioCtx = null;
-  gainNode = null;
-  streamDest = null;
-  cancelAnimationFrame(vizRaf);
-  analyser = null;
-  drawViz(null);  // вернуть «спящие» заглушки
-  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
-  setStatus(streamLive ? 'Эфир идёт' : 'ПК не в эфире', streamLive ? 'live' : 'err');
+// 把一包排到 ctx 时间轴上：样本级首尾相接 + 平滑变速保持目标余量。
+function schedule(pcm, ch, n, tms, gap) {
+  // 输出设备真正开始走时钟之前（创建后常有 100 ms 以上的启动时间）不排程，
+  // 否则这段时间的包会全部变成多余的缓冲。
+  if (ctx.state !== 'running' || ctx.currentTime === 0) return;
+  const nowF = ctx.currentTime * sr;
+  const sp = setpoint();
+  let startF = nextFrame;
+  let lead = (startF - nowF) / sr;
+
+  if (!nextFrame || lead < 0) {
+    // 播完了还没等到新包（卡顿），或刚开始：留出余量重新起播。
+    if (nextFrame && gap < 250) {           // 间隔很长说明电脑端本来就没声音，不算卡顿
+      st.under++;
+      lastUnder = tms;
+      quietUntil = tms + 300;
+      if (mode === 'auto') boostMs = Math.min(150, boostMs + 10);
+    }
+    startF = Math.ceil(nowF + (setpoint() + 0.004) * sr);
+    leadT.length = leadV.length = 0;
+  } else if (lead > sp + 0.25 || (leadT.length && tms - leadT[0] > 1000 && windowMin() > sp + 0.03)) {
+    // 积压太多（从后台回来，或卡顿后积压的包一起到达），且持续 1 秒以上：
+    // 丢掉多余部分，直接回到目标附近（比慢慢变速追赶快得多）。
+    startF = cutQueue(Math.ceil(nowF + (sp + 0.004) * sr));
+    leadT.length = leadV.length = 0;
+    st.cuts++;
+  }
+  lead = (startF - nowF) / sr;
+
+  // 控制量 = 最近 8 秒排队余量的最小值（即最坏时刻还剩多少）。
+  if (tms >= quietUntil) { leadT.push(tms); leadV.push(lead); }
+  while (leadT.length && leadT[0] < tms - WIN_MS) { leadT.shift(); leadV.shift(); }
+  const err = leadV.length ? windowMin() - sp : 0;
+  let r = 1;
+  if (err > 0.002) r = 1 + Math.min(0.006, (err - 0.002) * 0.3);       // 余量多：稍快播放，逐步收紧
+  else if (err < -0.001) r = 1 - Math.min(0.003, (-err - 0.001) * 0.3); // 余量少：稍慢播放，攒余量
+  st.ratio = r;
+  st.buf = isNaN(st.buf) ? lead : st.buf * 0.95 + lead * 0.05;
+
+  // 流式线性插值重采样（采样率相同且 r=1 时就是原样拷贝）。
+  const step = srcRate / sr * r;
+  const count = Math.max(0, Math.ceil((n - 1 - rsPos) / step));
+  if (!count) { rsPos -= n; return; }
+  const ab = ctx.createBuffer(2, count, sr);
+  const L = ab.getChannelData(0), R = ab.getChannelData(1);
+  const k = 1 / 32768;
+  const rOff = ch > 1 ? 1 : 0;
+  for (let j = 0; j < count; j++) {
+    const p = rsPos + j * step;
+    const i = Math.floor(p), f = p - i;
+    let aL, aR;
+    if (i < 0) { aL = rsL; aR = rsR; } else { aL = pcm[i * ch] * k; aR = pcm[i * ch + rOff] * k; }
+    const bi = (i + 1) * ch;
+    const bL = pcm[bi] * k, bR = pcm[bi + rOff] * k;
+    L[j] = aL + (bL - aL) * f;
+    R[j] = aR + (bR - aR) * f;
+  }
+  rsPos = rsPos + count * step - n;
+  rsL = pcm[(n - 1) * ch] * k; rsR = pcm[(n - 1) * ch + rOff] * k;
+
+  const node = ctx.createBufferSource();
+  node.buffer = ab;
+  node.connect(gain);
+  node.start(startF / sr);
+  queue.push({ node, s: startF, e: startF + count });
+  nextFrame = startF + count;
+  while (queue.length && queue[0].e < nowF) queue.shift();
 }
 
-playBtn.addEventListener('click', () => {
-  if (started) stopPlayback(); else startPlayback();
-});
+function windowMin() {
+  let mn = Infinity;
+  for (let i = 0; i < leadV.length; i++) if (leadV[i] < mn) mn = leadV[i];
+  return mn;
+}
 
-// Применяем целевой буфер на лету и запоминаем число.
+// 停掉从 cutF 之后才开始的块，返回新的续播位置。
+function cutQueue(cutF) {
+  let end = cutF;
+  const keep = [];
+  for (const q of queue) {
+    if (q.s >= cutF) { try { q.node.stop(); } catch (e) {} }
+    else { keep.push(q); if (q.e > end) end = q.e; }
+  }
+  queue = keep;
+  return end;
+}
+
+// ===================== 延迟估算与统计 =====================
+const latTotal = $('latTotal'), bars = [$('b0'), $('b1'), $('b2'), $('b3')], legs = [$('l0'), $('l1'), $('l2'), $('l3')];
+const statsEl = $('stats'), stats2 = $('stats2');
+function fmtMs(v) { return isFinite(v) ? (v < 10 ? v.toFixed(1) : Math.round(v)) + ' ms' : '—'; }
+setInterval(() => {
+  // 连续 15 秒没卡顿，才开始收回追加的余量（每秒 0.25 ms）。
+  if (mode === 'auto' && boostMs > 0 && performance.now() - lastUnder > 15000) boostMs = Math.max(0, boostMs - 0.0625);
+  const now = performance.now();
+  if (now - lastArrival > 1000) { st.pps = 0; }
+  const net = st.rtts.length ? Math.min(...st.rtts) / 2 : NaN;
+  let jit = NaN;
+  if (arrO.length > 10) { let a = Infinity, b = -Infinity; for (const o of arrO) { if (o < a) a = o; if (o > b) b = o; } jit = b - a; }
+  const playing = started && ctx;
+  const pc = st.pc, buf = playing ? st.buf * 1000 : NaN;
+  const out = playing ? ((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000 : NaN;
+  const parts = [pc, net, buf, out];
+  if (playing && parts.every(isFinite)) {
+    const total = parts.reduce((a, b) => a + b, 0);
+    latTotal.innerHTML = '≈ ' + Math.round(total) + '<small>ms</small>';
+    parts.forEach((v, i) => { bars[i].style.width = Math.max(0, v / total * 100) + '%'; legs[i].textContent = fmtMs(v); });
+  } else {
+    latTotal.textContent = '—';
+    parts.forEach((v, i) => { bars[i].style.width = '0'; legs[i].textContent = isFinite(v) ? fmtMs(v) : '—'; });
+  }
+  statsEl.textContent = `抖动 ${fmtMs(jit)} · 卡顿 ${st.under} 次 · 余量目标 ${fmtMs(setpoint() * 1000)}`;
+  const dpps = st.pkts - st.lastPkts; st.lastPkts = st.pkts; st.pps = st.pps ? st.pps * 0.5 + dpps * 4 * 0.5 : dpps * 4;
+  stats2.textContent = playing
+    ? `播放速度 ${(st.ratio * 100).toFixed(2)}% · 积压裁剪 ${st.cuts} 次 · 输出采样率 ${sr / 1000} kHz · ${Math.round(st.pps)} 包/秒` +
+      (bgMode ? ' · 锁屏模式（经 <audio>，额外延迟未计入）' : '')
+    : '';
+}, 250);
+
+// ===================== 设置 =====================
+const segBtns = document.querySelectorAll('.seg button');
+function setMode(m, save) {
+  mode = m;
+  segBtns.forEach((b) => b.classList.toggle('on', b.dataset.m === m));
+  manualBox.hidden = m !== 'manual';
+  autoNote.hidden = m !== 'auto';
+  if (m === 'auto') boostMs = 0;
+  leadT.length = leadV.length = 0;
+  if (save) lsSet('ss-mode2', m);
+}
+segBtns.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m, true)));
 function setBuf(ms, save) {
-  bufMs = ms;
-  cfg = cfgFromBuf(ms);
-  bufVal.textContent = ms + ' мс';
-  buf.value = ms;
-  buf.style.setProperty('--p', ((ms - 10) / 190 * 100) + '%');  // заливка трека (webkit)
-  if (started) nextTime = 0;  // мгновенно пересобрать буфер под новое значение
-  if (save) lsSet('ss-buf', String(ms));
+  manualMs = ms;
+  bufVal.textContent = ms + ' ms';
+  bufIn.value = ms;
+  bufIn.style.setProperty('--p', (ms / 150 * 100) + '%');
+  leadT.length = leadV.length = 0;
+  if (save) lsSet('ss-buf2', String(ms));
 }
-buf.addEventListener('input', () => setBuf(parseInt(buf.value, 10), true));
-setBuf(bufMs, false);  // инициализация подписи и положения ползунка
+bufIn.addEventListener('input', () => setBuf(parseInt(bufIn.value, 10), true));
+setMode(mode, false);
+setBuf(manualMs, false);
 
-// ---- Живой эквалайзер: рисуем реальный спектр из AnalyserNode ----
+bgIn.checked = bgMode;
+bgIn.addEventListener('change', () => { bgMode = bgIn.checked; lsSet('ss-bg', bgMode ? '1' : '0'); restartPlayback(); });
+vizIn.checked = vizOn;
+vizIn.addEventListener('change', () => {
+  vizOn = vizIn.checked; lsSet('ss-viz', vizOn ? '1' : '0');
+  if (vizOn) attachViz(); else detachViz();
+  viz.hidden = !vizOn;
+});
+viz.hidden = !vizOn;
 
-// Подгоняем канвас под размер на экране и плотность пикселей.
+// ===================== 频谱（30 帧/秒，可关） =====================
+const BARS = 24;
+let vizRaf = 0, barMap = null, vizData = null, lastDraw = 0;
+function attachViz() {
+  if (!ctx || analyser) return;
+  analyser = ctx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.7;
+  gain.connect(analyser);
+  const bins = analyser.frequencyBinCount, ny = sr / 2, fmin = 60, fmax = Math.min(16000, ny);
+  barMap = [];
+  for (let i = 0; i < BARS; i++) {
+    const f0 = fmin * Math.pow(fmax / fmin, i / BARS), f1 = fmin * Math.pow(fmax / fmin, (i + 1) / BARS);
+    const b0 = Math.max(0, Math.min(bins - 1, Math.floor(f0 / ny * bins)));
+    barMap.push([b0, Math.max(b0 + 1, Math.min(bins, Math.ceil(f1 / ny * bins)))]);
+  }
+  vizData = new Uint8Array(bins);
+  cancelAnimationFrame(vizRaf);
+  const loop = (t) => {
+    if (!analyser) return;
+    vizRaf = requestAnimationFrame(loop);
+    if (t - lastDraw < 33) return;
+    lastDraw = t;
+    analyser.getByteFrequencyData(vizData);
+    drawViz(vizData);
+  };
+  vizRaf = requestAnimationFrame(loop);
+}
+function detachViz() {
+  cancelAnimationFrame(vizRaf);
+  if (analyser && gain) { try { gain.disconnect(analyser); } catch (e) {} }
+  analyser = null;
+  drawViz(null);
+}
 function sizeViz() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = viz.clientWidth, h = viz.clientHeight;
   if (!w || !h) return;
-  viz.width = Math.round(w * dpr);
-  viz.height = Math.round(h * dpr);
+  viz.width = Math.round(w * dpr); viz.height = Math.round(h * dpr);
   vctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (!started) drawViz(null);
+  if (!analyser) drawViz(null);
 }
-
-// Столбик -> диапазон FFT-бинов по логарифмической шкале (50 Гц–15 кГц):
-// так басы не съедают всю картинку, а верхам достаётся место.
-function buildBarMap(sr, bins) {
-  const ny = sr / 2;
-  const fmin = 50, fmax = Math.min(15000, ny);
-  barMap = [];
-  for (let i = 0; i < VIZ_BARS; i++) {
-    const f0 = fmin * Math.pow(fmax / fmin, i / VIZ_BARS);
-    const f1 = fmin * Math.pow(fmax / fmin, (i + 1) / VIZ_BARS);
-    let b0 = Math.floor(f0 / ny * bins), b1 = Math.ceil(f1 / ny * bins);
-    b0 = Math.max(0, Math.min(bins - 1, b0));
-    b1 = Math.max(b0 + 1, Math.min(bins, b1));
-    barMap.push([b0, b1]);
-  }
-}
-
-// data — байты спектра; null — «спящее» состояние (серые заглушки).
 function drawViz(data) {
   const w = viz.clientWidth, h = viz.clientHeight;
   if (!w || !h) return;
   vctx.clearRect(0, 0, w, h);
-  const gap = 5;
-  const bw = (w - gap * (VIZ_BARS - 1)) / VIZ_BARS;
-  const stub = 4, r = Math.min(3, bw / 2);
+  const gap = 4, bw = (w - gap * (BARS - 1)) / BARS, stub = 3;
   vctx.fillStyle = data ? '#30d158' : '#2c2c2e';
-  for (let i = 0; i < VIZ_BARS; i++) {
+  vctx.beginPath();
+  for (let i = 0; i < BARS; i++) {
     let v = 0;
     if (data && barMap) {
       const [b0, b1] = barMap[i];
-      let s = 0;
-      for (let b = b0; b < b1; b++) s += data[b];
-      v = Math.min(1, s / (b1 - b0) / 255 * 1.25);
-      v = Math.pow(v, 1.35);  // лёгкая кривая — живее реагирует на музыку
+      let s = 0; for (let b = b0; b < b1; b++) s += data[b];
+      v = Math.pow(Math.min(1, s / (b1 - b0) / 255 * 1.25), 1.35);
     }
     const bh = stub + v * (h - stub);
-    const x = i * (bw + gap), y = h - bh;
-    vctx.beginPath();
-    if (vctx.roundRect) vctx.roundRect(x, y, bw, bh, r);
-    else vctx.rect(x, y, bw, bh);
-    vctx.fill();
+    vctx.rect(i * (bw + gap), h - bh, bw, bh);
   }
+  vctx.fill();
 }
-
-function startViz() {
-  cancelAnimationFrame(vizRaf);
-  if (!analyser) return;
-  const data = new Uint8Array(analyser.frequencyBinCount);
-  const loop = () => {
-    if (!started || !analyser) return;
-    analyser.getByteFrequencyData(data);
-    drawViz(data);
-    vizRaf = requestAnimationFrame(loop);
-  };
-  loop();
-}
-
 window.addEventListener('resize', sizeViz);
 sizeViz();
 
-// При возврате из фона/разблокировке: будим контекст, перезапускаем <audio>
-// и эквалайзер, прыгаем к живому краю (за время паузы поток ушёл вперёд).
+// 回到前台：唤醒音频；积压由 schedule() 自动丢弃。
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !started || !audioCtx) return;
-  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-  audioEl.play().catch(() => {});
-  nextTime = 0;
-  startViz();
+  if (document.visibilityState !== 'visible' || !started || !ctx) return;
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  if (bgMode) audioEl.play().catch(() => {});
 });
 
 connect();

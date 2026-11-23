@@ -30,10 +30,10 @@ use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-use crate::state::Source;
+use crate::state::{Choice, Source};
 use crate::tray::{self, Exit, Kind};
 use crate::wide::wide;
-use crate::{autostart, net};
+use crate::{autostart, capture, net};
 
 use gfx::Color;
 use kit::Theme;
@@ -49,6 +49,8 @@ pub enum Act {
     Player,
     /// Открыть главное окно.
     Window,
+    /// 弹出采集设备菜单。
+    Device,
     Autostart,
     Log,
     Restart,
@@ -74,10 +76,10 @@ impl Status {
 
     fn label(self) -> String {
         match self {
-            Status::Starting => "Запуск…".into(),
-            Status::PortBusy => "Порт занят".into(),
-            Status::Ready => "Готов · ждёт телефон".into(),
-            Status::Live(n) => format!("В эфире · {}", listeners(n)),
+            Status::Starting => "启动中…".into(),
+            Status::PortBusy => "端口被占用".into(),
+            Status::Ready => "就绪 · 等待收听".into(),
+            Status::Live(n) => format!("推流中 · {}", listeners(n)),
         }
     }
 }
@@ -89,6 +91,8 @@ pub struct Info {
     /// [0] — постоянный адрес `.local`, дальше — по IP.
     pub urls: Vec<String>,
     pub source: Option<Source>,
+    /// 用户选的采集设备（None = 跟随默认输出）。
+    pub choice: Option<Choice>,
     pub autostart: bool,
 }
 
@@ -111,6 +115,7 @@ fn info() -> Info {
         port: a.cfg.port,
         urls,
         source: a.source(),
+        choice: a.choice(),
         autostart: autostart::is_enabled(),
     }
 }
@@ -161,13 +166,10 @@ fn perform(act: Act) {
         }
         Act::Player => open(&a.cfg.local_url()),
         Act::Window => window::show(),
+        Act::Device => device_menu(),
         Act::Autostart => {
             if !autostart::set(!autostart::is_enabled()) {
-                tray::notify(
-                    "Автозапуск",
-                    "Не удалось изменить настройку.",
-                    Kind::Warning,
-                );
+                tray::notify("开机自启", "无法修改此设置。", Kind::Warning);
             }
         }
         Act::Log => open(&crate::log::path().to_string_lossy()),
@@ -176,21 +178,16 @@ fn perform(act: Act) {
     }
 }
 
-/// «1 слушатель», «2 слушателя», «5 слушателей».
+/// 「2 位听众」。
 fn listeners(n: usize) -> String {
-    let word = match (n % 10, n % 100) {
-        (1, r) if r != 11 => "слушатель",
-        (2..=4, r) if !(12..=14).contains(&r) => "слушателя",
-        _ => "слушателей",
-    };
-    format!("{n} {word}")
+    format!("{n} 位听众")
 }
 
 fn khz(rate: u32) -> String {
     if rate % 1000 == 0 {
         (rate / 1000).to_string()
     } else {
-        format!("{:.1}", rate as f64 / 1000.0).replace('.', ",")
+        format!("{:.1}", rate as f64 / 1000.0)
     }
 }
 
@@ -255,6 +252,142 @@ unsafe fn decorate(hwnd: HWND, dark: bool, backdrop: i32, round: bool) -> bool {
         cyBottomHeight: -1,
     };
     DwmExtendFrameIntoClientArea(hwnd, &all) >= 0 && set(DWMWA_SYSTEMBACKDROP_TYPE, backdrop)
+}
+
+/// 采集来源的一行说明：「48 kHz · 立体声 · 输出回环」。
+fn source_detail(s: &Source) -> String {
+    if s.fallback {
+        return format!("{} kHz · 所选设备不可用，暂用默认输出", khz(s.sample_rate));
+    }
+    let ch = if s.channels == 1 { "单声道→立体声" } else { "立体声" };
+    let kind = if s.input { "输入设备" } else { "输出回环" };
+    format!("{} kHz · {ch} · {kind}", khz(s.sample_rate))
+}
+
+/// 未在采集时显示的目标设备名。
+fn choice_label(c: &Option<Choice>) -> String {
+    match c {
+        Some(c) if !c.name.is_empty() => c.name.clone(),
+        Some(_) => "已选设备".into(),
+        None => "Windows 默认输出".into(),
+    }
+}
+
+const MENU_DEFAULT: usize = 1;
+const MENU_KEEP: usize = 2;
+const MENU_SETTINGS: usize = 3;
+const MENU_DEVICE0: usize = 100;
+
+/// 弹出菜单：跟随默认输出 / 各输出设备（回环）/ 各输入设备 / 打开声音设置。
+fn device_menu() {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, PostMessageW,
+        SetForegroundWindow, TrackPopupMenu, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
+        TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_NULL,
+    };
+
+    let app = tray::app();
+    let list = capture::list_devices();
+    let choice = app.choice();
+    let chosen = |id: &str| choice.as_ref().is_some_and(|c| c.id == id);
+    let default_out = list
+        .iter()
+        .find(|d| !d.input && d.default)
+        .map(|d| d.name.clone())
+        .unwrap_or_else(|| "无".into());
+
+    // SAFETY: 菜单在本函数内创建并销毁；字符串在调用期间有效。
+    unsafe {
+        let m = CreatePopupMenu();
+        if m.is_null() {
+            return;
+        }
+        let add = |flags: u32, id: usize, label: &str| {
+            let w = wide(label);
+            AppendMenuW(m, flags, id, w.as_ptr());
+        };
+        let check = |on: bool| if on { MF_CHECKED } else { 0 };
+        add(
+            MF_STRING | check(choice.is_none()),
+            MENU_DEFAULT,
+            &format!("跟随 Windows 默认输出（当前：{default_out}）"),
+        );
+        add(MF_SEPARATOR, 0, "");
+        add(MF_STRING | MF_GRAYED, 0, "输出设备 — 采集它正在播放的声音");
+        for (i, d) in list.iter().enumerate().filter(|(_, d)| !d.input) {
+            let label = if d.default { format!("    {}（默认）", d.name) } else { format!("    {}", d.name) };
+            add(MF_STRING | check(chosen(&d.id)), MENU_DEVICE0 + i, &label);
+        }
+        add(MF_SEPARATOR, 0, "");
+        add(MF_STRING | MF_GRAYED, 0, "输入设备 — 麦克风 / 线路输入 / 虚拟声卡");
+        for (i, d) in list.iter().enumerate().filter(|(_, d)| d.input) {
+            let label = if d.default { format!("    {}（默认）", d.name) } else { format!("    {}", d.name) };
+            add(MF_STRING | check(chosen(&d.id)), MENU_DEVICE0 + i, &label);
+        }
+        if let Some(c) = choice.as_ref().filter(|c| !list.iter().any(|d| d.id == c.id)) {
+            add(MF_SEPARATOR, 0, "");
+            add(
+                MF_STRING | MF_CHECKED,
+                MENU_KEEP,
+                &format!("{}（未连接，暂用默认输出）", choice_label(&Some(c.clone()))),
+            );
+        }
+        add(MF_SEPARATOR, 0, "");
+        add(MF_STRING, MENU_SETTINGS, "打开 Windows 声音设置…");
+
+        let mut owner = GetActiveWindow();
+        if owner.is_null() {
+            owner = tray::hwnd();
+        }
+        let mut pt = POINT { x: 0, y: 0 };
+        GetCursorPos(&mut pt);
+        SetForegroundWindow(owner);
+        let cmd = TrackPopupMenu(
+            m,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+            pt.x,
+            pt.y,
+            0,
+            owner,
+            std::ptr::null(),
+        ) as usize;
+        PostMessageW(owner, WM_NULL, 0, 0);
+        DestroyMenu(m);
+
+        match cmd {
+            MENU_DEFAULT => app.set_choice(None),
+            MENU_SETTINGS => sound_settings(),
+            n if n >= MENU_DEVICE0 => {
+                if let Some(d) = list.get(n - MENU_DEVICE0) {
+                    app.set_choice(Some(Choice {
+                        id: d.id.clone(),
+                        name: d.name.clone(),
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 经典「声音」控制面板（可以设默认设备、采样率）。
+fn sound_settings() {
+    let verb = wide("open");
+    let exe = wide("control.exe");
+    let args = wide("mmsys.cpl");
+    // SAFETY: 字符串以 0 结尾。
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            exe.as_ptr(),
+            args.as_ptr(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+    }
 }
 
 fn copy_text(hwnd: HWND, s: &str) -> bool {

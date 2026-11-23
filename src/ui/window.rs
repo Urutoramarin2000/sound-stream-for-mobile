@@ -299,8 +299,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WIN.with(|w| w.borrow_mut().take());
             if !TOLD.swap(true, Ordering::SeqCst) && !tray::quitting() {
                 tray::notify(
-                    "Sound Stream работает в трее",
-                    "Окно закрыто, звук на телефон идёт дальше. Значок — у часов.",
+                    "Sound Stream 仍在托盘运行",
+                    "窗口已关闭，声音继续传输。图标在任务栏右下角。",
                     tray::Kind::Info,
                 );
             }
@@ -352,7 +352,7 @@ fn draw(ui: &mut Ui, info: &Info, sel: usize, qr: Option<&QrCode>) {
         t.text(),
     );
     p.text(
-        "Звук этого компьютера — в браузере телефона",
+        "把这台电脑的声音传到 Mac / 手机的浏览器",
         Rect::new(76.0, 44.0, 400.0, 20.0),
         Font::text(13.0),
         t.text3(),
@@ -387,14 +387,14 @@ fn draw(ui: &mut Ui, info: &Info, sel: usize, qr: Option<&QrCode>) {
     let tx = card.x + 16.0 + QR + 20.0;
     let tw = card.r() - 16.0 - tx;
     p.text(
-        "Слушать на телефоне",
+        "在其他设备上收听",
         Rect::new(tx, card.y + 18.0, tw, 22.0),
         Font::text(14.0).strong(),
         t.text(),
     );
     p.text(
-        "Наведи камеру телефона на QR-код или открой адрес в браузере. \
-         Телефон и компьютер должны быть в одной Wi-Fi сети.",
+        "手机扫码，或在 Mac / 手机浏览器里打开下面的地址。\
+         设备需与这台电脑在同一局域网（同一 Wi-Fi / 路由器）。",
         Rect::new(tx, card.y + 46.0, tw, QR - 30.0),
         Font::text(13.0).wrap(),
         t.text2(),
@@ -423,7 +423,7 @@ fn draw(ui: &mut Ui, info: &Info, sel: usize, qr: Option<&QrCode>) {
 
     // Низ: главное действие слева, выход справа.
     let fy = TOP + h + GAP;
-    let play = "Открыть плеер на этом ПК";
+    let play = "在本机打开播放器";
     let bw = button_w(play, true);
     ui.button(
         Rect::new(PAD, fy, bw, 32.0),
@@ -432,7 +432,7 @@ fn draw(ui: &mut Ui, info: &Info, sel: usize, qr: Option<&QrCode>) {
         Act::Player,
         Kind::Accent,
     );
-    let quit = "Выйти";
+    let quit = "退出";
     let qw = button_w(quit, true);
     ui.button(
         Rect::new(W - PAD - qw, fy, qw, 32.0),
@@ -468,11 +468,11 @@ fn address_row(ui: &mut Ui, r: Rect, i: usize, url: &str, selected: bool) {
     );
     let copy = Act::Copy(i as u8);
     let (note, color) = if copied(copy) {
-        ("Скопировано в буфер обмена", t.accent())
+        ("已复制到剪贴板", t.accent())
     } else if i == 0 {
-        ("Постоянный — добавь его в закладки", t.text3())
+        ("固定地址 — 建议加入书签", t.text3())
     } else {
-        ("По IP — если адрес .local не открывается", t.text3())
+        ("IP 地址 — .local 打不开时用这个", t.text3())
     };
     ui.p.text(
         note,
@@ -507,21 +507,27 @@ fn source_card(ui: &mut Ui, r: Rect, info: &Info) {
     );
     let (title, detail) = match (&info.status, &info.source) {
         (Status::PortBusy, _) => (
-            format!("Порт {} занят", info.port),
-            "Жду, пока он освободится".to_string(),
+            format!("端口 {} 被占用", info.port),
+            "等待端口释放".to_string(),
         ),
-        (_, Some(s)) => (
-            s.device.clone(),
-            format!("{} кГц · моно", super::khz(s.sample_rate)),
-        ),
-        (Status::Starting, None) => ("Сервер запускается…".into(), String::new()),
+        (_, Some(s)) => (s.device.clone(), super::source_detail(s)),
+        (Status::Starting, None) => ("服务启动中…".into(), String::new()),
         (_, None) => (
-            "Звук пока не захватывается".into(),
-            "Начнётся с первым слушателем".into(),
+            super::choice_label(&info.choice),
+            "有人收听时开始采集".into(),
         ),
     };
+    let pick = "选择设备";
+    let bw = button_w(pick, false);
+    ui.button(
+        Rect::new(r.r() - 16.0 - bw, r.y + 18.0, bw, 32.0),
+        pick,
+        None,
+        Act::Device,
+        Kind::Standard,
+    );
     let tx = tile.r() + 12.0;
-    let tw = r.r() - 16.0 - tx;
+    let tw = r.r() - 16.0 - bw - 8.0 - tx;
     p.text(
         &title,
         Rect::new(tx, r.y + 14.0, tw, 20.0),
@@ -536,10 +542,10 @@ fn source_card(ui: &mut Ui, r: Rect, info: &Info) {
     );
     p.hline(r.x + 16.0, r.r() - 16.0, r.y + 68.0, t.divider());
     let row = Rect::new(r.x + 16.0, r.y + 68.0, r.w - 32.0, r.h - 68.0);
-    p.text("Слушатели", row, Font::text(14.0), t.text2());
+    p.text("听众", row, Font::text(14.0), t.text2());
     let n = match info.status {
         Status::Live(n) => n.to_string(),
-        _ => "нет".into(),
+        _ => "无".into(),
     };
     p.text(&n, row, Font::text(14.0).strong().right(), t.text());
 }
@@ -565,14 +571,14 @@ fn settings_card(ui: &mut Ui, r: Rect, info: &Info) {
     };
 
     let r0 = row(0);
-    caption(ui, r0, "Автозапуск", "При входе в Windows, без окна", 56.0);
+    caption(ui, r0, "开机自启", "登录 Windows 时在后台启动", 56.0);
     ui.toggle(r0, info.autostart, Act::Autostart);
     ui.p.hline(r.x + 16.0, r.r() - 16.0, r0.b(), t.divider());
 
     let r1 = row(1);
-    let open = "Открыть";
+    let open = "打开";
     let ow = button_w(open, false);
-    caption(ui, r1, "Журнал", "Если что-то не работает", ow + 12.0);
+    caption(ui, r1, "日志", "出问题时查看", ow + 12.0);
     ui.button(
         Rect::new(r1.r() - ow, r1.cy() - 16.0, ow, 32.0),
         open,
@@ -583,9 +589,9 @@ fn settings_card(ui: &mut Ui, r: Rect, info: &Info) {
     ui.p.hline(r.x + 16.0, r.r() - 16.0, r1.b(), t.divider());
 
     let r2 = row(2);
-    let restart = "Перезапустить";
+    let restart = "重启";
     let rw = button_w(restart, false);
-    caption(ui, r2, "Сервер", &format!("Порт {}", info.port), rw + 12.0);
+    caption(ui, r2, "服务", &format!("端口 {}", info.port), rw + 12.0);
     ui.button(
         Rect::new(r2.r() - rw, r2.cy() - 16.0, rw, 32.0),
         restart,

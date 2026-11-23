@@ -1,5 +1,22 @@
 # 🔊 Sound Stream
 
+> **本分支（stereo-lowlat）改动**
+>
+> - **立体声**：发送交错立体声 Int16（原版是单声道），5.1/7.1 的中置声道按 -3 dB 混入左右。
+> - **更低延迟**：每次 WASAPI 唤醒立刻发包（不再攒整 10 ms 帧）；采集线程用 MMCSS「Pro Audio」优先级；
+>   播放页按样本级首尾相接排程，用 ≤0.6% 的平滑重采样追赶时钟漂移（原版是 ±2% 的变速，会听到音高跳变），
+>   缓冲默认**自动**：让最近 8 秒最紧张的时刻也还剩约 3 ms，卡顿后自动加大、稳定后收回，积压超标直接裁掉；
+>   默认直连音频输出，「锁屏/后台播放」改为可选开关（iPhone 锁屏才需要）。
+> - **选择采集设备**：窗口「采集来源」卡片的「选择设备」按钮、托盘面板的来源行、网页下拉框都能选：
+>   跟随 Windows 默认输出 / 任意输出设备（采集它播放的声音）/ 任意输入设备（麦克风、线路输入、虚拟声卡）。
+>   选择保存在 `%LOCALAPPDATA%\sound-stream\device.txt`；设备拔掉时暂用默认输出，插回后自动切回。
+> - **延迟估算**：网页显示 ≈总延迟 = 采集（PC 端实测，包头携带）+ 网络（ping 往返/2）+ 缓冲 + 浏览器输出延迟，另有抖动、卡顿次数。
+> - **Mac / iPhone**：AudioContext 与电脑同采样率；iOS 17+ 设为 playback 会话，静音开关不再静掉声音；
+>   频谱动画限 30 帧/秒且可关；Mac 上空格键播放/停止。界面改为中文。
+>
+> 用法：Windows 上双击 `sound-stream.exe` → Mac 浏览器打开窗口里显示的地址（`http://sound-stream.local:47823/` 或 IP）→ 点播放。
+> 只想在 Mac 上听、电脑不出声：装一个虚拟声卡（如 VB-CABLE）设为 Windows 默认输出，然后在「选择设备」里选它（或保持「跟随默认输出」）。
+
 Listen to your Windows PC's audio on your phone, right in the browser. No app to install.
 
 A single `sound-stream.exe` captures everything your speakers play (WASAPI loopback) and

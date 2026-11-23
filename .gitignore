@@ -18,3 +18,6 @@ graft/
 # trail: only the learnings belong in the repo
 .trail/*
 !.trail/learnings/
+
+# Local builds
+/dist/

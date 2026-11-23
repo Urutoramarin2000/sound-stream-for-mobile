@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::gfx::{Canvas, Font, Rect};
 use super::kit::{
-    button_w, Hits, Kind, Theme, Ui, G_CHECK, G_COPY, G_DOC, G_PLAY, G_POWER, G_REFRESH, G_SPEAKER,
+    button_w, Hits, Kind, St, Theme, Ui, G_CHECK, G_COPY, G_DOC, G_PLAY, G_POWER, G_REFRESH, G_SPEAKER,
     G_WINDOW,
 };
 use super::{copied, Act, Info, Status};
@@ -331,7 +331,7 @@ fn draw(ui: &mut Ui, info: &Info) {
     let card = Rect::new(12.0, ADDR_TOP, W - 24.0, addr_h(info.urls.len()));
     ui.card(card);
     p.text(
-        "Адрес для телефона",
+        "收听地址",
         Rect::new(card.x + 12.0, card.y + 8.0, card.w - 24.0, 18.0),
         Font::text(12.0),
         t.text3(),
@@ -365,15 +365,32 @@ fn draw(ui: &mut Ui, info: &Info) {
         if live { t.accent() } else { t.text3() },
     );
     let line = match (&info.status, &info.source) {
-        (Status::PortBusy, _) => format!("Порт {} занят другой программой", info.port),
-        (_, Some(s)) => format!("{} · {} кГц", s.device, super::khz(s.sample_rate)),
-        _ => "Звук захватывается, пока подключён телефон".into(),
+        (Status::PortBusy, _) => format!("端口 {} 被其他程序占用", info.port),
+        (_, Some(s)) => format!("{} · {} kHz", s.device, super::khz(s.sample_rate)),
+        _ => format!("{} · 有人收听时开始采集", super::choice_label(&info.choice)),
     };
+    // 整行可点：弹出设备菜单。
+    let row = Rect::new(PAD - 6.0, y, W - 2.0 * PAD + 12.0, 24.0);
+    ui.hits.add(row, Act::Device);
+    let bg = match ui.hits.st(Act::Device) {
+        St::Rest => super::gfx::Color::CLEAR,
+        St::Hover => t.subtle_hover(),
+        St::Down => t.subtle_press(),
+    };
+    p.fill(row, 4.0, bg);
+    let more = "更改";
+    let mw = super::gfx::measure(more, Font::text(12.0)).ceil();
     p.text(
         &line,
-        Rect::new(PAD + 26.0, y, W - 2.0 * PAD - 26.0, 24.0),
+        Rect::new(PAD + 26.0, y, W - 2.0 * PAD - 26.0 - mw - 8.0, 24.0),
         Font::text(12.0),
         t.text2(),
+    );
+    p.text(
+        more,
+        Rect::new(W - PAD - mw, y, mw, 24.0),
+        Font::text(12.0),
+        t.accent(),
     );
 
     // Кнопки.
@@ -381,14 +398,14 @@ fn draw(ui: &mut Ui, info: &Info) {
     let bw = (W - 2.0 * PAD - 8.0) / 2.0;
     ui.button(
         Rect::new(PAD, y, bw, 32.0),
-        "Плеер на ПК",
+        "本机播放器",
         Some(G_PLAY),
         Act::Player,
         Kind::Accent,
     );
     ui.button(
         Rect::new(PAD + bw + 8.0, y, bw, 32.0),
-        "Перезапустить",
+        "重启服务",
         Some(G_REFRESH),
         Act::Restart,
         Kind::Standard,
@@ -398,7 +415,7 @@ fn draw(ui: &mut Ui, info: &Info) {
     let y = y + 32.0 + 8.0;
     let row = Rect::new(PAD, y, W - 2.0 * PAD, 40.0);
     p.text(
-        "Запускать при входе в Windows",
+        "登录 Windows 时自动启动",
         Rect::new(row.x, row.y, row.w - 52.0, row.h),
         Font::text(14.0),
         t.text(),
@@ -410,7 +427,7 @@ fn draw(ui: &mut Ui, info: &Info) {
     let foot = Rect::new(0.0, y, W, FOOT_H);
     p.fill(foot, 0.0, t.footer());
     p.hline(0.0, W, y, t.divider());
-    let log = "Журнал";
+    let log = "日志";
     ui.button(
         Rect::new(PAD - 6.0, y + 10.0, button_w(log, true), 32.0),
         log,
@@ -418,7 +435,7 @@ fn draw(ui: &mut Ui, info: &Info) {
         Act::Log,
         Kind::Subtle,
     );
-    let quit = "Выход";
+    let quit = "退出";
     let qw = button_w(quit, true);
     ui.button(
         Rect::new(W - PAD + 6.0 - qw, y + 10.0, qw, 32.0),
