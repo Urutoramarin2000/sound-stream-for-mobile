@@ -361,10 +361,8 @@ function startPlayback() {
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
   const AC = window.AudioContext || window.webkitAudioContext;
   // 与电脑端同采样率：不用重采样，样本原样播放。
-  // latencyHint: 0 = 浏览器允许的最小缓冲（Mac 版 Chrome 上 128 帧，比 'interactive' 少约 2.7 ms）。
-  for (const opts of [{ latencyHint: 0, sampleRate: srcRate }, { latencyHint: 'interactive', sampleRate: srcRate }, { latencyHint: 'interactive' }]) {
-    try { ctx = new AC(opts); break; } catch (e) {}
-  }
+  try { ctx = new AC({ latencyHint: 'interactive', sampleRate: srcRate }); }
+  catch (e) { ctx = new AC({ latencyHint: 'interactive' }); }
   sr = ctx.sampleRate;
   gain = ctx.createGain();
   if (bgMode) {
